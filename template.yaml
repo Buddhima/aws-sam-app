@@ -1,0 +1,137 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Test Project
+
+Parameters:
+  AppName:
+    Type: String
+    Default: test-app
+  Stage:
+    Type: String
+    Default: dev
+
+
+Globals:
+  Function:
+    Runtime: nodejs14.x
+    Timeout: 10
+    Handler: index.handler
+    Architectures:
+      - x86_64
+    Environment:
+      Variables:
+        Deployment: !Ref Stage
+    Tags:
+      Organization: Company
+      Project: TestProject
+      Environment: Development
+
+
+
+Resources:
+  
+  ##### Lambda Functions #####
+  # More info about Function Resource: https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/sam-resource-function.html
+
+  BuildMessageFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AppName}-${Stage}-BuildMessageFn
+      CodeUri: functions/build_message/
+
+
+  PostMessageFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AppName}-${Stage}-PostMessageFn
+      CodeUri: functions/post_message/
+  
+
+  ##### State Machines #####
+
+  PostMessageStateMachine:
+    Type: AWS::Serverless::StateMachine # More info about State Machine Resource: https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/sam-resource-statemachine.html
+    Properties:
+      Name:
+        Fn::Sub: ${AppName}-${Stage}-PostMessageSM
+      DefinitionUri: statemachine/fz2_deal_stage_updated_to_qualified_lead.asl.json
+      DefinitionSubstitutions:
+        BuildMessageFunctionArn: !GetAtt BuildMessageFunction.Arn
+        PostMessageFunctionArn: !GetAtt PostMessageFunction.Arn
+      Policies: # Find out more about SAM policy templates: https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/serverless-policy-templates.html
+        - LambdaInvokePolicy:
+            FunctionName: !Ref BuildMessageFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref PostMessageFunction
+      Tags:
+        Organization: Company
+        Project: TestProject
+        Environment: Development
+
+
+  ##### HTTP APIs #####
+
+  TestProjectApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: !Ref Stage
+      DefinitionBody:
+        Fn::Transform:
+          Name: AWS::Include
+          Parameters:
+            Location: apigateway/definition/api_gateway-swagger.yaml
+
+
+  ##### API Gateway Role and Policy #####
+
+  ApiGatewayIamRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: ''
+            Effect: 'Allow'
+            Principal:
+              Service:
+                - 'apigateway.amazonaws.com'
+            Action:
+              - 'sts:AssumeRole'
+      Path: '/'
+      Tags:
+      - Key: Organization
+        Value: Company
+      - Key: Project
+        Value: TestCompany
+      - Key: Environment
+        Value: Development
+
+  ApiGatewayPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: "service-policy-apigateway"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+        -
+          Effect: 'Allow'
+          Action: 'states:*'
+          Resource: '*'
+      Roles: 
+      - 
+        !Ref ApiGatewayIamRole
+
+
+
+Outputs:
+  # Find out more about other implicit resources you can reference within SAM
+  # https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/sam-specification-generated-resources.html
+  TestProjectApi: 
+    Description: "API Gateway endpoint URL for deployed stage"
+    Value: !Sub "https://${TestProjectApi}.execute-api.${AWS::Region}.amazonaws.com/${Stage}"
+
+
+
